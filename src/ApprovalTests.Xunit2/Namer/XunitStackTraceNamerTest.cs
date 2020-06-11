@@ -1,11 +1,18 @@
+using System.IO;
+using System.Runtime.CompilerServices;
+using ApprovalTests;
 using ApprovalUtilities.Utilities;
+using System.Threading.Tasks;
+using ApprovalTests.Core;
+using ApprovalTests.Namers;
+using ApprovalTests.Reporters;
+using ApprovalTests.Writers;
 using Xunit;
 
 namespace ApprovalTests.Xunit2.Namer
 {
     using Namers;
     using Namers.StackTraceParsers;
-    using System;
     using System.Diagnostics;
     using System.IO;
     using System.Threading.Tasks;
@@ -19,7 +26,7 @@ namespace ApprovalTests.Xunit2.Namer
             var name = new UnitTestFrameworkNamer().Name;
             var sourcePath = new UnitTestFrameworkNamer().SourcePath;
 
-            await AnAsyncMethod();
+            await AsyncStringResult();
 
             Assert.Equal("XunitStackTraceNamerTest.AsyncTestApprovalName", name);
             Assert.True(File.Exists($@"{sourcePath}\XunitStackTraceNamerTest.cs"));
@@ -28,18 +35,26 @@ namespace ApprovalTests.Xunit2.Namer
         [Fact]
         public async Task FullAsyncTest()
         {
-            await AnAsyncMethod();
+            await AsyncStringResult();
             Approvals.Verify("Async");
         }
 
-        [Fact(Skip = "This is Hard")]
-        //[Fact]
-        public async Task ProperFullAsyncTest()
+        [Fact]
+        public async Task AsyncExtensionTestFails()
         {
-            await Task.Delay(10);
-            // This is the stack trace, and needs to do MAGIC!
-            //   at ApprovalTests.Xunit.Namer.XunitStackTraceNamerTest.<ProperFullAsyncTest>d__c.MoveNext()
-            Approvals.Verify("Async with Delay");
+            await AsyncStringResult().VerifyFails();
+        }
+
+        [Fact]
+        public async Task AsyncExtensionTestPasses()
+        {
+            await AsyncStringResult().VerifyPasses();
+        }
+
+        [Fact]
+        public async Task AsyncExtensionTestPassesWithScenario()
+        {
+            await AsyncStringResult().VerifyPasses("Scenario");
         }
 
         [Fact]
@@ -49,7 +64,7 @@ namespace ApprovalTests.Xunit2.Namer
             Assert.Equal("XunitStackTraceNamerTest.TestApprovalName", name);
         }
 
-        [InheritedFactAttribute]
+        [InheritedFact]
         public void TestApprovalName_InheritedFact()
         {
             var name = new UnitTestFrameworkNamer().Name;
@@ -65,20 +80,52 @@ namespace ApprovalTests.Xunit2.Namer
             Approvals.Verify(exception.Message);
         }
 
-        private static Task AnAsyncMethod()
+        private static async Task<string> AsyncStringResult()
         {
-            return Task.FromResult(default(object));
-        }
-
-        private void AssertEquals<T>(string typeName)
-        {
-            var instance = Type.GetType(typeName, false);
-            Assert.Equal(typeof(T), instance);
+            await Task.Delay(10);
+            return "Async with Delay";
         }
     }
 }
 
-public class InheritedFactAttribute:FactAttribute
+public class InheritedFactAttribute : FactAttribute
 {
+}
 
+public static class ApprovalExtensions
+{
+    public static async Task VerifyFails(this Task<string> textTask)
+    {
+        Approvals.Verify(await textTask);
+    }
+
+    public static async Task VerifyPasses(
+        this Task<string> textTask,
+        string scenarioName = null,
+        [CallerFilePath] string filePath = null,
+        [CallerMemberName] string memberName = null)
+    {
+        Approvals.Verify(
+            WriterFactory.CreateTextWriter(await textTask),
+            new ManualNamer(filePath, memberName, scenarioName),
+            DiffReporter.INSTANCE);
+    }
+}
+
+public class ManualNamer : IApprovalNamer
+{
+    private readonly string additionalInfo;
+    private readonly string name;
+    private readonly string filePath;
+
+    public ManualNamer(string filePath, string name, string additionalInfo = null)
+    {
+        this.filePath = filePath;
+        this.name = name;
+        this.additionalInfo = additionalInfo;
+    }
+
+    public string SourcePath => Path.GetDirectoryName(filePath);
+
+    public string Name => ApprovalResults.Scrub(additionalInfo != null ? $"{name}.{additionalInfo}" : name);
 }
